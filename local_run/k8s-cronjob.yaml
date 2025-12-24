@@ -1,0 +1,126 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vuln-list-updater-config
+  namespace: security
+data:
+  GITLAB_BASE_URL: "https://gitlab.example.com"
+  GITLAB_GROUP: "security/vulnerability-data"
+  WORK_DIR: "/workspace"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vuln-list-updater-secrets
+  namespace: security
+type: Opaque
+stringData:
+  GITLAB_TOKEN: "your-gitlab-token-here"
+  NVD_API_KEY: "your-nvd-api-key-here"  # Optional but recommended
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vuln-list-updater
+  namespace: security
+spec:
+  # Run every 6 hours
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid  # Don't run concurrent jobs
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 21600  # 6 hour timeout
+      template:
+        metadata:
+          labels:
+            app: vuln-list-updater
+        spec:
+          restartPolicy: OnFailure
+          
+          # Use init container to ensure workspace is clean
+          initContainers:
+          - name: cleanup
+            image: alpine:latest
+            command: ['sh', '-c', 'rm -rf /workspace/* /workspace/.git || true']
+            volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          
+          containers:
+          - name: updater
+            image: your-registry/vuln-list-updater:latest
+            imagePullPolicy: Always
+            
+            envFrom:
+            - configMapRef:
+                name: vuln-list-updater-config
+            - secretRef:
+                name: vuln-list-updater-secrets
+            
+            resources:
+              requests:
+                memory: "2Gi"
+                cpu: "1000m"
+              limits:
+                memory: "4Gi"
+                cpu: "2000m"
+            
+            volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          
+          volumes:
+          - name: workspace
+            emptyDir:
+              sizeLimit: 30Gi  # Enough for all repos including Red Hat (22GB)
+
+---
+# Optional: Manual job trigger
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vuln-list-updater-manual
+  namespace: security
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 21600
+  template:
+    metadata:
+      labels:
+        app: vuln-list-updater
+    spec:
+      restartPolicy: OnFailure
+      
+      containers:
+      - name: updater
+        image: your-registry/vuln-list-updater:latest
+        imagePullPolicy: Always
+        
+        envFrom:
+        - configMapRef:
+            name: vuln-list-updater-config
+        - secretRef:
+            name: vuln-list-updater-secrets
+        
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      
+      volumes:
+      - name: workspace
+        emptyDir:
+          sizeLimit: 30Gi
