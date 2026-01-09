@@ -96,15 +96,15 @@ cleanup() {
         echo "[$(date +%T)] Lock file removed"
     fi
     
-    if [ $exit_code -ne 0 ]; then
+    if [ $exit_code -ne 0 ] && [ "$UPDATE_INTERRUPTED" != true ]; then
         echo "[$(date +%T)] Exiting with errors (code: $exit_code)"
     fi
-    
-    exit $exit_code
 }
 
-# Set trap to ensure cleanup on exit
-trap 'UPDATE_INTERRUPTED=true; cleanup' INT TERM
+# Set trap to ensure cleanup on exit (EXIT catches all exit scenarios)
+trap cleanup EXIT
+trap 'UPDATE_INTERRUPTED=true; exit 130' INT
+trap 'UPDATE_INTERRUPTED=true; exit 143' TERM
 
 echo "=== Local Vulnerability List Updater ==="
 echo "Cache directory: ${CACHE_DIR}"
